@@ -29,6 +29,8 @@ pub struct AkashaConfig {
     pub headers: Option<HeaderMap>,
     pub cache_ttl: Duration,
     pub debug: bool,
+    /// Root of the API, including the `/api` segment.
+    pub base_url: String,
 }
 
 impl Default for AkashaConfig {
@@ -38,6 +40,7 @@ impl Default for AkashaConfig {
             headers: None,
             cache_ttl: Duration::from_secs(360),
             debug: false,
+            base_url: BASE_URL.to_owned(),
         }
     }
 }
@@ -51,6 +54,12 @@ pub struct AkashaBuilder {
 impl AkashaBuilder {
     pub fn language(mut self, language: Language) -> Self {
         self.config.language = language;
+        self
+    }
+
+    /// Point the client at a different API root, for example a local proxy.
+    pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.config.base_url = base_url.into();
         self
     }
 
@@ -144,6 +153,10 @@ impl Akasha {
         self.inner.config.cache_ttl
     }
 
+    pub fn base_url(&self) -> &str {
+        &self.inner.config.base_url
+    }
+
     async fn request(
         &self,
         endpoint: &str,
@@ -151,8 +164,9 @@ impl Akasha {
         params: Vec<(&str, String)>,
         return_raw: bool,
     ) -> Result<Value> {
+        let base_url = self.inner.config.base_url.trim_end_matches('/');
         let mut url =
-            Url::parse(&format!("{BASE_URL}/{endpoint}")).map_err(|e| Error::Url(e.to_string()))?;
+            Url::parse(&format!("{base_url}/{endpoint}")).map_err(|e| Error::Url(e.to_string()))?;
 
         if !params.is_empty() {
             let mut query = url.query_pairs_mut();
@@ -167,7 +181,7 @@ impl Akasha {
             let cache = self.inner.cache.lock().unwrap();
             if let Some(entry) = cache.get(&cache_key) {
                 if entry.expires_at > Instant::now() {
-                    return Ok(entry.value.clone());
+                    return finish(entry.value.clone(), return_raw);
                 }
             }
         }
@@ -196,13 +210,7 @@ impl Akasha {
             );
         }
 
-        if return_raw {
-            return Ok(value);
-        }
-
-        let data = value.get("data").cloned().unwrap_or(value);
-        raise_for_error(&data)?;
-        Ok(data)
+        finish(value, return_raw)
     }
 
     async fn get_json<T: DeserializeOwned>(
@@ -401,6 +409,30 @@ impl Akasha {
         LeaderboardPaginator::new(self.clone(), calculation_id, options)
     }
 
+    /// Fetch one leaderboard page, starting after `cursor`.
+    ///
+    /// Akasha paginates by result value rather than by page number, so callers
+    /// pass the last result they saw as `cursor`. An empty cursor starts at the
+    /// top of the leaderboard.
+    pub async fn get_leaderboards_page(
+        &self,
+        calculation_id: u64,
+        page_size: u32,
+        cursor: &str,
+        variant: Option<&str>,
+        uids: Option<&[u64]>,
+        use_cache: bool,
+    ) -> Result<Vec<Leaderboard>> {
+        let p = if cursor.is_empty() {
+            String::new()
+        } else {
+            format!("lt|{cursor}")
+        };
+
+        self.fetch_leaderboards(calculation_id, 1, page_size, &p, variant, uids, use_cache)
+            .await
+    }
+
     /// Get the size of a collection.
     pub async fn get_collection_size(&self, hash: &str, variant: &str) -> Result<u64> {
         let value = self
@@ -456,7 +488,7 @@ impl Akasha {
             ("sort", sort_by.as_str().to_owned()),
             ("order", order_by.value().to_string()),
             ("page", page.to_string()),
-            ("pageSize", page_size.to_string()),
+            ("size", page_size.to_string()),
             ("p", p.to_owned()),
             ("fromId", from_id.to_owned()),
         ];
@@ -468,6 +500,28 @@ impl Akasha {
     /// Get a paginator for profiles.
     pub fn get_profiles(&self, options: ProfileOptions) -> ProfilePaginator {
         ProfilePaginator::new(self.clone(), options)
+    }
+
+    /// Fetch one profile page, starting after `cursor`.
+    ///
+    /// `from_id` is the `_id` of the last profile from the previous page.
+    pub async fn get_profiles_page(
+        &self,
+        sort_by: ProfileSortBy,
+        order_by: OrderBy,
+        page_size: u32,
+        cursor: &str,
+        from_id: &str,
+        use_cache: bool,
+    ) -> Result<Vec<Profile>> {
+        let p = if cursor.is_empty() {
+            String::new()
+        } else {
+            format!("lt|{cursor}")
+        };
+
+        self.fetch_profiles(sort_by, order_by, 1, page_size, &p, from_id, use_cache)
+            .await
     }
 
     pub(crate) async fn fetch_stygian_leaderboards(
@@ -524,6 +578,35 @@ impl Akasha {
     ) -> StygianLeaderboardPaginator {
         StygianLeaderboardPaginator::new(self.clone(), version.into(), options)
     }
+
+    /// Fetch one Stygian leaderboard page, starting after `cursor`.
+    pub async fn get_stygian_leaderboards_page(
+        &self,
+        version: &str,
+        page_size: u32,
+        cursor: &str,
+        uids: Option<&[u64]>,
+        use_cache: bool,
+    ) -> Result<Vec<StygianLeaderboard>> {
+        let p = if cursor.is_empty() {
+            String::new()
+        } else {
+            format!("lt|{cursor}")
+        };
+
+        self.fetch_stygian_leaderboards(1, page_size, &p, version, uids, use_cache)
+            .await
+    }
+}
+
+fn finish(value: Value, return_raw: bool) -> Result<Value> {
+    if return_raw {
+        return Ok(value);
+    }
+
+    let data = value.get("data").cloned().unwrap_or(value);
+    raise_for_error(&data)?;
+    Ok(data)
 }
 
 fn raise_for_error(data: &Value) -> Result<()> {

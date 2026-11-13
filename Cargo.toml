@@ -1,3 +1,7 @@
+[workspace]
+members = ["crates/akasha-service"]
+resolver = "2"
+
 [package]
 name = "akasha"
 version = "0.1.0"
@@ -24,6 +28,7 @@ tracing = "0.1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+wiremock = "0.6"
 
 [lib]
 name = "akasha"

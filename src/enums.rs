@@ -37,6 +37,24 @@ pub enum Language {
 }
 
 impl Language {
+    /// Every language supported by Akasha System.
+    pub const ALL: [Self; 14] = [
+        Self::English,
+        Self::German,
+        Self::French,
+        Self::Spanish,
+        Self::Italian,
+        Self::Japanese,
+        Self::Korean,
+        Self::Portuguese,
+        Self::Russian,
+        Self::Thai,
+        Self::Turkish,
+        Self::Vietnamese,
+        Self::ChineseSimplified,
+        Self::ChineseTraditional,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::English => "en",

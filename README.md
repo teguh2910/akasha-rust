@@ -83,6 +83,68 @@ Run it with:
 cargo run --example basic
 ```
 
+## HTTP service
+
+`crates/akasha-service` exposes the client as a small JSON API. It is deployed at
+`https://akas.ttmi.my.id`.
+
+```bash
+# Build and run locally (listens on 0.0.0.0:8099 by default)
+cargo run -p akasha-service
+```
+
+Endpoints:
+
+| Method | Path | Query parameters |
+| --- | --- | --- |
+| GET | `/health` | - |
+| GET | `/v1/health` | - |
+| GET | `/v1/users/{uid}/characters` | `lang`, `fresh` |
+| GET | `/v1/users/{uid}/artifacts/{md5}` | `lang` |
+| GET | `/v1/characters/{character_id}/categories` | `lang` |
+| GET | `/v1/leaderboards/{calculation_id}` | `lang`, `size`, `cursor`, `variant`, `uids`, `fresh` |
+| GET | `/v1/profiles` | `lang`, `sort`, `order`, `size`, `cursor`, `from_id`, `fresh` |
+| GET | `/v1/stygian/{version}` | `lang`, `size`, `cursor`, `uids`, `fresh` |
+
+Query parameters:
+
+| Param | Type | Default | Description |
+| --- | --- | --- | --- |
+| `lang` | string | `en` | `en`, `de`, `fr`, `es`, `it`, `ja`, `ko`, `pt`, `ru`, `th`, `tr`, `vi`, `zh-CN`, `zh-TW` |
+| `size` | integer | `20` | Page size, `1`-`100` |
+| `cursor` | number | empty | Value from `next_cursor`; empty starts at the top |
+| `from_id` | string | empty | Value from `next_from_id`; profiles only |
+| `variant` | string | empty | Leaderboard variant filter |
+| `uids` | string | empty | Comma-separated UIDs to filter by |
+| `sort` | string | `stygian` | Profiles: `stygian`, `achievements`, `updated` |
+| `order` | string | `desc` | `asc` or `desc` |
+| `fresh` | boolean | `false` | `true` skips the in-process cache |
+
+Every response is JSON. Single-resource endpoints return `{ "data": ... }`; list
+endpoints also return `next_cursor` (and `next_from_id` for profiles), which you
+pass back as `cursor` / `from_id` to read the next page.
+
+```bash
+# Player characters
+curl 'https://akas.ttmi.my.id/v1/users/901211014/characters?lang=en'
+
+# First leaderboard page, then the next one
+curl 'https://akas.ttmi.my.id/v1/leaderboards/1000000216?size=20'
+curl 'https://akas.ttmi.my.id/v1/leaderboards/1000000216?size=20&cursor=1282729.6509002843'
+
+# Profiles sorted by last update
+curl 'https://akas.ttmi.my.id/v1/profiles?sort=updated&size=20'
+
+# Stygian Onslaught
+curl 'https://akas.ttmi.my.id/v1/stygian/5_8?size=20'
+```
+
+> akasha.cv answers this host with a Cloudflare challenge when the TLS
+> fingerprint looks like a plain HTTP client. The service therefore points at
+> `scripts/akasha_fetch_proxy.py`, a loopback-only Python proxy that uses a
+> browser fingerprint via `curl_cffi`. Set `AKASHA_BASE_URL` to change the
+> upstream root. See [`deploy/README.md`](deploy/README.md).
+
 ## Differences from the Python wrapper
 
 - Paginators expose an async `next()` that returns `Result<Option<T>>`; `collect_all()` collects every remaining item.
